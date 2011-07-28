@@ -1,0 +1,31 @@
+--- #YAML:1.0
+name:               App-scrape
+version:            0.02
+abstract:           simple HTML scraping
+author:
+    - Max Maischein <corion@cpan.org>
+license:            perl
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
+requires:
+    Exporter:             0
+    Getopt::Long:         0
+    HTML::Selector::XPath:  0
+    HTML::TreeBuilder::XPath:  0
+    LWP::Simple:          0
+    perl:                 5.006
+    Pod::Usage:           0
+    Time::Piece:          0
+resources:
+    repository:  http://github.com/Corion/app-scrape
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.54
+meta-spec:
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4
