@@ -24,8 +24,11 @@ WriteMakefile1(
     'VERSION_FROM'  => 'lib/App/scrape.pm', # finds $VERSION
     'EXE_FILES'     => ['bin/scrape.pl', 'bin/scrape2rss.pl'],
     'PREREQ_PM'     => { 
-                        'HTML::TreeBuilder::XPath' => 0, # the first DOM we implement
+                        # the first DOM we implement
+                        'HTML::TreeBuilder::XPath' => 0.10, # v0.10 for ->findvalues()
                         'HTML::Selector::XPath' => 0,
+                        'URI' => 0,
+                        'XML::Atom::SimpleFeed' => 0, # for scrape2rss
                         'LWP::Simple' => 0, # for page fetching
                         'Time::Piece' => 0, # for date parsing
                         'Exporter' => 0,

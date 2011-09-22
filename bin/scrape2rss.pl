@@ -7,7 +7,7 @@ use Pod::Usage;
 use XML::Atom::SimpleFeed;
 use Time::Piece;
 use vars qw($VERSION);
-$VERSION = '0.02';
+$VERSION = '0.03';
 
 =head1 NAME
 
@@ -20,42 +20,64 @@ specifying CSS3 or XPath selectors.
 
 =head1 SYNOPSIS
 
-    scrape.pl URL selector selector ...
+    scrape2rss.pl URL OPTIONS
 
-    # Print page title
-    scrape.pl http://perl.org title
-    # The Perl Programming Language - www.perl.org
-
-    # Print links with titles, make links absolute
-    scrape.pl http://perl.org a //a/@href --uri=2
-    
-    # Print all links to JPG images, make links absolute
-    scrape.pl http://perl.org a[@href=$"jpg"]
+    scrape2rss.pl
+        http://conferences.yapceurope.org/gpw2011/news
+        --feed-title "GPW 2011 Atom Feed"
+        --title "h3 a"
+        --summary "h3+p+p"
+        --permalink "h3 a@href"
+        --date "h3+p em"
+        --date-fmt "%d/%m/%y %H:%M"
+        -o gpw2011.de.atom 
 
 =head1 DESCRIPTION
 
-This program fetches an HTML page and extracts nodes
-matched by XPath or CSS selectors from it.
+This program fetches an HTML page and creates
+an RSS feed from it. The elements that are turned
+into the RSS feed are specified as CSS or XPath selectors.
 
-If URL is C<->, input will be read from STDIN.
+If the URL is C<->, input will be read from STDIN.
 
 =head1 OPTIONS
 
 =over 4
 
-=item B<--sep>
+=item B<--title>
 
-Separator character to use for columns. Default is tab.
+Selector for the entry title
 
-=item B<--uri> COLUMNS
+=item B<--summary>
 
-Numbers of columns to convert into absolute URIs, if the
-known attributes do not everything you want.
+Selector for the entry summary
 
-=item B<--no-uri>
+=item B<--permalink>
 
-Switches off the automatic translation to absolute
-URIs for known attributes like C<href> and C<src>.
+Selector for the entry permalink
+
+=item B<--pages>
+
+Selector for the pagination links to follow
+
+=item B<--date>
+
+Selector for the entry publication date
+
+=item B<--date-fmt>
+
+C<sprintf> format that the entry publication date is in
+for conversion into a proper Atom timestamp
+
+=item B<--outfile>
+
+Name of the output file
+
+Default is STDOUT
+
+=item B<--debug>
+
+Output information in clear text
 
 =back
 
@@ -68,6 +90,7 @@ GetOptions(
     'title|t:s' => \my $title,
     'summary|s:s' => \my $summary,
     'permalink|l:s' => \my $permalink,
+    'pages|p:s' => \my $pages,
     'date:s' => \my $date,
     'date-fmt:s' => \my $date_fmt,
     'category|c:s' => \my $category,
@@ -76,38 +99,17 @@ GetOptions(
 ) or pod2usage(2);
 pod2usage(1) if $help;
 
+die "No URL given.\n"
+    unless @ARGV;
+
 $feed_url ||= $outfile || 'feed.atom';
-$title ||= 'Atom feed';
+$feed_title ||= 'Atom feed';
 $category ||= '';
-
-# Now determine where we get the HTML to scrape from:
-my $url = shift @ARGV;
-
-my $html;
-if ($url eq '-') {
-    # read from STDIN
-    local $/;
-    $html = <>;
-} else {
-    $html = get $url;
-};
-
-my @fields;
-
-my @rows = scrape($html, {
-        summary => $summary,
-        permalink => $permalink,
-        title => $title,
-        date => $date,
-        #category => $category,
-    }, {
-    base => $url,
-});
 
 my $updated = Time::Piece->gmtime->strftime('%Y-%m-%dT%H:%M:%SZ');
 
 my $feed = XML::Atom::SimpleFeed->new(
-    title   => $title,
+    title   => $feed_title,
     link    => $feed_url,
     link    => { rel => 'self', href => $feed_url, },
     author  => 'scrape2rss',
@@ -115,42 +117,29 @@ my $feed = XML::Atom::SimpleFeed->new(
     updated => $updated,
 );
 
-for my $item (@rows) {
-    my $updated = $item->{date} || $updated;
+my %seen;
+while (@ARGV) {
+    my $url = shift @ARGV;
+    next if $seen{ $url }++;
     
-    # Now, extract the information, just in case there is "garbage"
-    # around the string
-    (my $extr = $date_fmt) =~ s!%\w!\\d+!g;
-    $extr = qr/($extr)/;
-    
-    $updated =~ $extr
-        or warn "Is [$updated] a valid date?";
-    $updated = $1;
-    warn $updated;
-    
-    my $ts = Time::Piece->strptime( $updated, $date_fmt );
-    $updated = $ts->strftime('%Y-%m-%dT%H:%M:%SZ');
-
-    my $enc_url = URI::Escape::uri_escape($item->{permalink});
-    
-    my %info = (
-        title     => $item->{title},
-        link      => $enc_url,
-        id        => $enc_url,
-        summary   => $item->{summary},
-        updated   => $updated,
-        category  => ($item->{category} || $category),
-    );
-    
-    if ($debug) {
-        for (sort keys %info) {
-            printf "%10s : %s\n", $_, $info{ $_ };
-        };
+    my $html;
+    if ($url eq '-') {
+        # read from STDIN
+        local $/;
+        $html = <>;
+    } else {
+        $html = get $url;
     };
-        
-    # beware. XML::Atom::SimpleFeed uses warnings => fatal,
-    # so all warnings within it die.
-    $feed->add_entry(%info);
+    
+    do_scrape($feed, $url, $html);
+    
+    if ($pages) {
+        my @pagination = scrape( $html,
+            { page => $pages },
+            { base => $url },
+        );
+        push @ARGV, grep { !$seen{ $_ }} map {  $_->{page} } @pagination;
+    };
 };
 
 if ($outfile) {
@@ -159,6 +148,62 @@ if ($outfile) {
 };
     
 print $feed->as_string;
+
+sub do_scrape {
+    my ($feed, $url, $html) = @_;
+
+    my @fields;
+
+    my @rows = scrape($html, {
+            summary => $summary,
+            permalink => $permalink,
+            title => $title,
+            date => $date,
+            #category => $category,
+        }, {
+        base => $url,
+    });
+
+    for my $item (@rows) {
+        my $item_updated = $item->{date} || $updated;
+        
+        # Now, extract the information, just in case there is "garbage"
+        # around the string
+        (my $extr = $date_fmt) =~ s!%\w!\\d+!g;
+        $extr = qr/($extr)/;
+        
+        if ($item_updated =~ /$extr/) {
+            $item_updated = $1;
+        } else {
+            warn "Is [$updated] a valid date?\n";
+            $item_updated = $updated;
+        };
+        
+        my $ts = Time::Piece->strptime( $item_updated, $date_fmt );
+        $updated = $ts->strftime('%Y-%m-%dT%H:%M:%SZ');
+
+        my $enc_url = $item->{permalink};
+        
+        my %info = (
+            title     => $item->{title},
+            link      => $enc_url,
+            id        => $enc_url,
+            summary   => $item->{summary},
+            updated   => $item_updated,
+            category  => ($item->{category} || $category),
+        );
+        
+        if ($debug) {
+            for (sort keys %info) {
+                printf "%10s : %s\n", $_, $info{ $_ };
+            };
+        };
+            
+        # beware. XML::Atom::SimpleFeed uses warnings => fatal,
+        # so all warnings within it die.
+        $feed->add_entry(%info);
+    };
+};
 
 =head1 REPOSITORY
 
