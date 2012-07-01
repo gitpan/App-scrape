@@ -1,6 +1,6 @@
 --- #YAML:1.0
 name:               App-scrape
-version:            0.03
+version:            0.04
 abstract:           simple HTML scraping
 author:
     - Max Maischein <corion@cpan.org>

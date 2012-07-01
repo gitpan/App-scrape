@@ -6,7 +6,7 @@ use HTML::Selector::XPath 'selector_to_xpath';
 use Exporter 'import';
 
 use vars qw($VERSION @EXPORT_OK);
-$VERSION = '0.03';
+$VERSION = '0.04';
 
 @EXPORT_OK = qw<scrape>;
 
@@ -64,10 +64,12 @@ sub scrape {
     my ($html, $selectors, $options) = @_;
     
     $options ||= {};
+    my $delete_tree;
     if (! ref $options->{tree}) {
         $options->{tree} = HTML::TreeBuilder::XPath->new;
         $options->{tree}->parse($html);
         $options->{tree}->eof;
+        $delete_tree = 1;
     };
     my $tree = $options->{tree};
     
@@ -97,9 +99,11 @@ sub scrape {
         if ($selector =~ s!/?\@(\w+)$!!) {
             $attr = $1;
         };
-        if ($selector !~ m!^/!) {
+        if ($selector !~ m!^\.?/!) {
             $selector = selector_to_xpath( $selector );
         };
+        # We always make the selector relative to the current node:
+        $selector = ".$selector" unless $selector =~ /^\./;
         my @nodes;
         if (! defined $attr) {
             @nodes = map { $_->as_trimmed_text } $tree->findnodes($selector);
@@ -107,7 +111,6 @@ sub scrape {
             $make_uri{ $rowidx } ||= (($known_uri{ lc $attr }) and ! $options->{no_known_uri});
             @nodes = $tree->findvalues("$selector/\@$attr");
         };
-        
         if ($make_uri{ $rowidx }) {
             @nodes = map { URI->new_abs( $_, $options->{base} )->as_string } @nodes;
         };
@@ -134,7 +137,8 @@ sub scrape {
             } @result
     };
 
-    $tree->delete;
+    $tree->delete
+        if $delete_tree;
     @result
 };
 
